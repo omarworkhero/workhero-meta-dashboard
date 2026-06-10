@@ -1,0 +1,6 @@
+{
+  "meta_access_token": "",
+  "daily_budget": 300,
+  "mql_cpl_target": 250,
+  "notes": "Paste your Meta token above for local use. On GitHub, secrets are injected by write_config.py."
+}
