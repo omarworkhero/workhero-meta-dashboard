@@ -36,10 +36,27 @@ jobs:
       - name: Generate dashboard
         run: python3 generate_dashboard.py
 
+      - name: Check Meta data present
+        id: check
+        run: |
+          if python3 -c "
+import re, sys
+html = open('dashboard.html').read()
+sys.exit(0 if re.search(r'const HAS_META = true', html) else 1)
+          "; then
+            echo "has_meta=true" >> $GITHUB_OUTPUT
+            echo "Meta data present — publishing"
+          else
+            echo "has_meta=false" >> $GITHUB_OUTPUT
+            echo "Meta token invalid — keeping previous dashboard live, skipping publish"
+          fi
+
       - name: Publish as index.html
+        if: steps.check.outputs.has_meta == 'true'
         run: mv dashboard.html index.html
 
       - name: Commit and push
+        if: steps.check.outputs.has_meta == 'true'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
