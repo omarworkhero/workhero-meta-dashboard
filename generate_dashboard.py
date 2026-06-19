@@ -715,25 +715,46 @@ function renderOverview() {{
   buildCplChart(from, to, metaRows, contacts);
 
   // Campaign table
-  const allCamps = [...new Set([
-    ...Object.keys(byCamp),
-    ...metaRows.map(r => r.campaign)
-  ])].sort((a,b) => (byCamp[b]?.mql||0) - (byCamp[a]?.mql||0));
-
-  const metaByCamp = {{}};
+  // Build Meta spend indexed by normalized name
+  const metaSpendByNorm = {{}}, metaNameForNorm = {{}};
   metaRows.forEach(r => {{
-    if (!metaByCamp[r.campaign]) metaByCamp[r.campaign] = {{spend:0}};
-    metaByCamp[r.campaign].spend += r.spend;
+    const n = normCamp(r.campaign);
+    metaSpendByNorm[n] = (metaSpendByNorm[n] || 0) + r.spend;
+    if (!metaNameForNorm[n]) metaNameForNorm[n] = r.campaign;
+  }});
+
+  // Merge HubSpot rows with Meta spend via fuzzy norm match
+  const consumedNorms = new Set();
+  const campRows = [];
+  Object.entries(byCamp).sort((a,b) => b[1].mql - a[1].mql).forEach(([hsKey, hs]) => {{
+    const n = normCamp(hsKey);
+    let spend = 0, dispName = hsKey;
+    if (metaSpendByNorm[n] !== undefined) {{
+      spend = metaSpendByNorm[n]; dispName = metaNameForNorm[n] || hsKey;
+      consumedNorms.add(n);
+    }} else {{
+      for (const [mn, ms] of Object.entries(metaSpendByNorm)) {{
+        if (!consumedNorms.has(mn) && (n.includes(mn) || mn.includes(n))) {{
+          spend = ms; dispName = metaNameForNorm[mn] || hsKey;
+          consumedNorms.add(mn); break;
+        }}
+      }}
+    }}
+    campRows.push({{ name: dispName, hs, spend }});
+  }});
+  // Append Meta-only campaigns that had no HubSpot match
+  Object.entries(metaSpendByNorm).forEach(([n, spend]) => {{
+    if (!consumedNorms.has(n))
+      campRows.push({{ name: metaNameForNorm[n], hs: {{total:0,mql:0,disq:0,bot:0}}, spend }});
   }});
 
   let campHTML = '';
-  allCamps.forEach(camp => {{
-    const hs = byCamp[camp] || {{total:0,mql:0,disq:0,bot:0}};
-    const sp = metaByCamp[camp]?.spend || 0;
+  campRows.forEach(row => {{
+    const hs = row.hs, sp = row.spend;
     const cplC = (hs.mql > 0 && sp > 0) ? fmtMoney(sp/hs.mql) : '—';
     const mqlR = hs.total > 0 ? fmtPct(hs.mql, hs.total) : '—';
     campHTML += `<tr>
-      <td class="td-name">${{camp}}</td>
+      <td class="td-name">${{row.name}}</td>
       <td class="r">${{sp > 0 ? fmtMoney(sp) : '<span class="na">N/A</span>'}}</td>
       <td class="r">${{hs.total}}</td>
       <td class="r td-mql">${{hs.mql}}</td>
