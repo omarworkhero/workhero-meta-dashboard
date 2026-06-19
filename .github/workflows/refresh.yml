@@ -39,11 +39,7 @@ jobs:
       - name: Check Meta data present
         id: check
         run: |
-          if python3 -c "
-import re, sys
-html = open('dashboard.html').read()
-sys.exit(0 if re.search(r'const HAS_META = true', html) else 1)
-          "; then
+          if grep -q 'const HAS_META = true' dashboard.html; then
             echo "has_meta=true" >> $GITHUB_OUTPUT
             echo "Meta data present — publishing"
           else
