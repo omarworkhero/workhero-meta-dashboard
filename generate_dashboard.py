@@ -555,7 +555,7 @@ const RAW_META_DAILY = {json.dumps(raw_meta_daily)};
 const RAW_META_AD_DAILY = {json.dumps(raw_meta_ad_daily)};
 const DAILY_BUDGET   = {DAILY_BUDGET};
 const MQL_CPL_TARGET = {MQL_CPL_TARGET};
-const HAS_META       = {json.dumps(has_meta)};
+const HAS_META = {json.dumps(has_meta)};
 
 // ── State ──
 let currentFrom = null, currentTo = null;
