@@ -121,7 +121,7 @@ meta_camp_daily = meta_get(META_ACCESS_TOKEN, "campaign",
     "campaign_name,campaign_id,spend,impressions,clicks",
     {"time_increment": 1})
 meta_ad_daily   = meta_get(META_ACCESS_TOKEN, "ad",
-    "campaign_name,adset_name,ad_name,spend,inline_link_clicks",
+    "campaign_name,adset_name,ad_name,ad_id,spend,inline_link_clicks",
     {"time_increment": 1})
 
 if not META_ACCESS_TOKEN:
@@ -204,6 +204,7 @@ for row in meta_ad_daily:
     raw_meta_ad_daily.append({
         "date":        row.get("date_start", ""),
         "ad":          (row.get("ad_name") or "Unknown").strip(),
+        "ad_id":       row.get("ad_id", ""),
         "adset":       (row.get("adset_name") or "").strip(),
         "campaign":    (row.get("campaign_name") or "Unknown").strip(),
         "spend":       sp,
@@ -213,6 +214,41 @@ for row in meta_ad_daily:
 has_meta  = bool(META_ACCESS_TOKEN and raw_meta_daily)
 has_ads   = bool(raw_meta_ad_daily)
 generated = datetime.now().strftime("%Y-%m-%d %H:%M")
+
+# ─── Fetch ad creative info (thumbnail, video type) ───────────────────────────
+def meta_get_ad_creatives(token, account_id):
+    if not token:
+        return {}
+    url = f"https://graph.facebook.com/v19.0/{account_id}/ads"
+    params = {
+        "fields": "id,name,creative{thumbnail_url,video_id,object_type}",
+        "effective_status": '["ACTIVE","PAUSED","ARCHIVED"]',
+        "limit": 500,
+        "access_token": token,
+    }
+    result = {}
+    while True:
+        r = requests.get(url, params=params, timeout=30)
+        if r.status_code != 200:
+            print(f"  ⚠  Ads creative API error: {r.json().get('error',{}).get('message', r.text)}")
+            break
+        body = r.json()
+        for ad in body.get("data", []):
+            cr = ad.get("creative", {})
+            result[ad["name"]] = {
+                "ad_id":    ad["id"],
+                "thumb":    cr.get("thumbnail_url", ""),
+                "is_video": bool(cr.get("video_id") or cr.get("object_type") == "VIDEO"),
+            }
+        after = body.get("paging", {}).get("cursors", {}).get("after")
+        if not after or not body.get("paging", {}).get("next"):
+            break
+        params["after"] = after
+    return result
+
+print("→ Meta: fetching ad creative thumbnails...")
+ad_creatives = meta_get_ad_creatives(META_ACCESS_TOKEN, META_ACCOUNT_ID)
+print(f"  {len(ad_creatives)} ads with creative info")
 
 # Print summary
 total_mqls = sum(1 for c in raw_contacts if c["status"] == "mql")
@@ -360,6 +396,16 @@ tr:hover td{{background:#f9fafb}}
 
 /* ── Creative tab ── */
 .creative-kpi{{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:16px}}
+.camp-hdr td{{background:#f1f5f9;border-top:2px solid var(--border);font-size:11px;color:var(--muted);padding:6px 12px;letter-spacing:.03em}}
+.camp-hdr:hover td{{background:#e9eef5}}
+.ad-row td{{background:var(--card);padding:7px 12px}}
+.ad-row:hover td{{background:#f9fafb}}
+.td-preview{{width:60px;vertical-align:middle}}
+.td-preview img{{width:48px;height:48px;object-fit:cover;border-radius:4px;display:block}}
+.type-badge,.theme-tag{{display:inline-block;padding:2px 7px;border-radius:10px;font-size:10px;font-weight:600;white-space:nowrap}}
+.type-video{{background:#ede9fe;color:#5b21b6}}
+.type-static{{background:#e0f2fe;color:#0369a1}}
+.type-unk{{background:#f1f5f9;color:#64748b}}
 .perf-bar{{background:#e5e7eb;border-radius:2px;height:4px;margin-top:4px}}
 .perf-fill{{height:4px;border-radius:2px;background:var(--blue)}}
 
@@ -424,11 +470,7 @@ tr:hover td{{background:#f9fafb}}
     </div>
   </div>''' if not has_meta else ''}
 
-  {f\'\'\'<div class="warn-box" style="background:#fef3c7;border-color:#f59e0b;color:#92400e">
-    <span style="font-size:16px">⏰</span>
-    <div><b>Meta token expires in {token_days_left} days</b> ({token_expiry_str}) — rotate it now to avoid a dashboard outage.<br>
-    Drop a fresh token from <code>developers.facebook.com/tools/explorer</code> into Claude Code chat.</div>
-  </div>\'\'\' if token_days_left is not None and 0 < token_days_left <= 14 else \'\'}
+  {'<div class="warn-box" style="background:#fef3c7;border-color:#f59e0b;color:#92400e"><span style="font-size:16px">⏰</span><div><b>Meta token expires in ' + str(token_days_left) + ' days</b> (' + token_expiry_str + ') — rotate it now.<br>Drop a fresh token from <code>developers.facebook.com/tools/explorer</code> into Claude Code chat.</div></div>' if token_days_left is not None and 0 < token_days_left <= 14 else ''}
 
   <!-- Status banner (updated by JS) -->
   <div id="statusBanner" class="status-banner s-na">
@@ -558,22 +600,22 @@ tr:hover td{{background:#f9fafb}}
     <div class="card-header">
       Live Creatives
       <span style="margin-left:8px;font-weight:400;color:var(--muted)" id="adCount"></span>
-      <span style="margin-left:auto;font-size:10px;font-weight:400;color:var(--muted)">Funnel data: HubSpot &nbsp;·&nbsp; Spend/Clicks: Meta &nbsp;·&nbsp; CPL = Meta spend ÷ HS MQLs</span>
+      <span style="margin-left:auto;font-size:10px;font-weight:400;color:var(--muted)">Spend/Clicks: Meta &nbsp;·&nbsp; MQLs/CPL: HubSpot (campaign level) &nbsp;·&nbsp; * = campaign total, not per-ad</span>
     </div>
     <table>
       <thead><tr>
+        <th style="width:60px">Preview</th>
         <th>Creative (Ad Name)</th>
-        <th>Campaign</th>
+        <th style="width:72px">Type</th>
+        <th style="width:110px">Theme</th>
         <th class="r">Spend</th>
-        <th class="r">Link Clicks</th>
-        <th class="r">Forms</th>
-        <th class="r">MQLs</th>
-        <th class="r">DQs</th>
-        <th class="r">Bots</th>
-        <th class="r">CPL</th>
+        <th class="r">Clicks</th>
+        <th class="r">MQLs *</th>
+        <th class="r">CPL *</th>
       </tr></thead>
       <tbody id="adTableBody"></tbody>
     </table>
+    <div style="font-size:10px;color:var(--muted);padding:8px 14px;border-top:1px solid var(--border)">* MQLs and CPL are campaign-level totals — HubSpot cannot attribute conversions to individual ads. Shaded rows = campaign summaries.</div>
   </div>
 
 </div>
@@ -584,6 +626,7 @@ tr:hover td{{background:#f9fafb}}
 const RAW_CONTACTS   = {json.dumps(raw_contacts)};
 const RAW_META_DAILY = {json.dumps(raw_meta_daily)};
 const RAW_META_AD_DAILY = {json.dumps(raw_meta_ad_daily)};
+const AD_CREATIVES      = {json.dumps(ad_creatives)};
 const DAILY_BUDGET   = {DAILY_BUDGET};
 const MQL_CPL_TARGET = {MQL_CPL_TARGET};
 const HAS_META = {json.dumps(has_meta)};
@@ -960,31 +1003,65 @@ function showCtab(type, btn) {{
 }}
 
 // ── Creative tab render ──
-// Normalize a campaign name for fuzzy matching
 function normCamp(s) {{
   return (s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+}}
+
+function inferTheme(name) {{
+  const n = name.toLowerCase();
+  if (n.includes('demo'))                                    return 'Demo';
+  if (n.includes('rebate'))                                  return 'Rebates';
+  if (n.includes('paperwork'))                               return 'Paperwork';
+  if (n.includes('closeout') || n.includes('close out'))     return 'Job Closeouts';
+  if (n.includes('invoice') || n.includes('billing') || /\\bar\\b/.test(n)) return 'Invoicing';
+  if (n.includes('install'))                                 return 'Install';
+  if (n.includes('bofu'))                                    return 'BOFU';
+  if (n.includes('grin') || n.includes('testimonial'))       return 'Testimonial';
+  if (n.includes('high season') || /\\bhs\\s*(var\\s*)?([-–]\\s*)?(ad\\s*)?\\d/i.test(name)) return 'High Season';
+  if (n.includes('fsm') || n.includes('service titan') || n.includes('housecall')) return 'FSM Pain';
+  return 'General';
+}}
+
+const THEME_COLORS = {{
+  'Demo':         ['#eff6ff','#2563eb'],
+  'Rebates':      ['#dcfce7','#16a34a'],
+  'Paperwork':    ['#fff7ed','#d97706'],
+  'Job Closeouts':['#faf5ff','#7c3aed'],
+  'Invoicing':    ['#fef2f2','#dc2626'],
+  'Install':      ['#ecfeff','#0891b2'],
+  'BOFU':         ['#f5f3ff','#6d28d9'],
+  'Testimonial':  ['#fdf4ff','#a21caf'],
+  'High Season':  ['#fff7ed','#ea580c'],
+  'FSM Pain':     ['#fef9c3','#a16207'],
+  'General':      ['#f1f5f9','#64748b'],
+}};
+
+function inferType(name, isVideoApi) {{
+  if (isVideoApi === true)  return 'Video';
+  if (isVideoApi === false) return 'Static';
+  const n = name.toLowerCase();
+  if (n.includes('video') || /\\bv\\d[-\\s]/.test(n)) return 'Video';
+  if (n.includes('image') || n.includes('static') || n.includes('img')) return 'Static';
+  return '?';
 }}
 
 function renderCreative() {{
   const from = currentFrom, to = currentTo;
 
-  // ── Step 1: Filter Meta ad-daily rows to selected range ──
+  // ── Step 1: Filter + aggregate ad daily rows ──
   const adDailyInRange = RAW_META_AD_DAILY.filter(r => r.date >= from && r.date <= to);
-
-  // Aggregate by ad name → spend + link_clicks + campaign
   const adMeta = {{}};
   adDailyInRange.forEach(r => {{
-    if (!adMeta[r.ad]) adMeta[r.ad] = {{ spend:0, link_clicks:0, campaign:r.campaign, adset:r.adset }};
+    if (!adMeta[r.ad]) adMeta[r.ad] = {{ spend:0, link_clicks:0, campaign:r.campaign, adset:r.adset, ad_id:r.ad_id||'' }};
     adMeta[r.ad].spend       += r.spend;
     adMeta[r.ad].link_clicks += r.link_clicks;
+    if (r.ad_id) adMeta[r.ad].ad_id = r.ad_id;
   }});
-
-  // "Live" = had spend > 0 in range
   const liveAds = Object.entries(adMeta)
     .filter(([_, v]) => v.spend > 0)
     .sort((a, b) => b[1].spend - a[1].spend);
 
-  // ── Step 2: Build HubSpot metrics by hs_analytics_source_data_2 ──
+  // ── Step 2: HubSpot by campaign source ──
   const contacts = filterContacts(from, to);
   const hsBySrc = {{}};
   contacts.forEach(c => {{
@@ -996,8 +1073,7 @@ function renderCreative() {{
     if (c.status === 'bot')          hsBySrc[k].bot++;
   }});
 
-  // ── Step 3: Match Meta campaign → HubSpot source (fuzzy, case-insensitive) ──
-  // Also aggregate HubSpot at campaign level so all ads in the same campaign share HS data
+  // ── Step 3: Fuzzy campaign → HubSpot match ──
   const campHsCache = {{}};
   function getHsForCampaign(metaCampaign) {{
     if (campHsCache[metaCampaign] !== undefined) return campHsCache[metaCampaign];
@@ -1025,20 +1101,15 @@ function renderCreative() {{
     filterDiv.appendChild(btn);
   }});
 
-  // Apply campaign filter
   const filtered = activeCampFilter === 'all'
     ? liveAds
     : liveAds.filter(([_, v]) => v.campaign === activeCampFilter);
 
-  // ── Step 5: KPIs ──
+  // ── Step 5: KPIs (campaign-deduplicated MQLs) ──
   const totalSpend = filtered.reduce((s, [_, v]) => s + v.spend, 0);
-  // Sum HubSpot MQLs across matched campaigns (deduplicate by campaign)
   const matchedCamps = new Set(filtered.map(([_, v]) => v.campaign));
-  let totalMql = 0, totalForms = 0;
-  matchedCamps.forEach(camp => {{
-    const hs = getHsForCampaign(camp);
-    if (hs) {{ totalMql += hs.mql; totalForms += hs.total; }}
-  }});
+  let totalMql = 0;
+  matchedCamps.forEach(camp => {{ const hs = getHsForCampaign(camp); if (hs) totalMql += hs.mql; }});
   const avgCpl = totalMql > 0 && totalSpend > 0 ? totalSpend / totalMql : null;
 
   document.getElementById('crCount').textContent    = filtered.length;
@@ -1048,33 +1119,87 @@ function renderCreative() {{
   document.getElementById('crCpl').innerHTML        = avgCpl ? fmtMoney(avgCpl) : '—';
   document.getElementById('adCount').textContent    = `(${{filtered.length}} live ads)`;
 
-  // ── Step 6: Table rows ──
-  let adHTML = '';
+  // ── Step 6: Group by campaign → campaign header + ad sub-rows ──
   if (filtered.length === 0) {{
-    adHTML = `<tr><td colspan="9" style="text-align:center;color:var(--muted);padding:24px">${{
-      HAS_META ? 'No active creatives in this date range.' : 'Add Meta token to config.json and rerun.'
-    }}</td></tr>`;
-  }} else {{
-    filtered.forEach(([adName, meta]) => {{
-      const hs  = getHsForCampaign(meta.campaign);
-      // CPL = this ad's spend / campaign MQLs (best we can do without ad-level attribution)
-      const cpl = (hs && hs.mql > 0 && meta.spend > 0) ? Math.round(meta.spend / hs.mql) : null;
-      const cplStr = cpl ? fmtMoney(cpl) : '<span class="na">—</span>';
-      const cplCls = cpl && cpl > MQL_CPL_TARGET ? 'style="color:var(--red);font-weight:600"' : (cpl && cpl <= MQL_CPL_TARGET ? 'style="color:var(--green);font-weight:600"' : '');
-
-      adHTML += `<tr>
-        <td class="td-name">${{adName}}</td>
-        <td class="td-sub">${{meta.campaign}}</td>
-        <td class="r">${{fmtMoney(meta.spend)}}</td>
-        <td class="r">${{meta.link_clicks > 0 ? meta.link_clicks.toLocaleString() : '—'}}</td>
-        <td class="r">${{hs ? hs.total : '<span class="na">—</span>'}}</td>
-        <td class="r td-mql">${{hs ? hs.mql : '<span class="na">—</span>'}}</td>
-        <td class="r td-disq">${{hs ? hs.disq : '<span class="na">—</span>'}}</td>
-        <td class="r td-bot">${{hs ? hs.bot  : '<span class="na">—</span>'}}</td>
-        <td class="r" ${{cplCls}}>${{cplStr}}</td>
-      </tr>`;
-    }});
+    document.getElementById('adTableBody').innerHTML =
+      `<tr><td colspan="8" style="text-align:center;color:var(--muted);padding:24px">${{
+        HAS_META ? 'No active creatives in this date range.' : 'Add Meta token to config.json and rerun.'
+      }}</td></tr>`;
+    return;
   }}
+
+  const byCamp = {{}};
+  filtered.forEach(([adName, meta]) => {{
+    const c = meta.campaign;
+    if (!byCamp[c]) byCamp[c] = {{ ads:[], spend:0, clicks:0 }};
+    byCamp[c].ads.push([adName, meta]);
+    byCamp[c].spend += meta.spend;
+    byCamp[c].clicks += meta.link_clicks;
+  }});
+
+  let adHTML = '';
+  Object.entries(byCamp)
+    .sort((a, b) => b[1].spend - a[1].spend)
+    .forEach(([camp, campData]) => {{
+      const hs      = getHsForCampaign(camp);
+      const campMql = hs ? hs.mql : null;
+      const campCpl = campMql > 0 ? Math.round(campData.spend / campMql) : null;
+      const mqlStr  = campMql != null ? `<span class="td-mql">${{campMql}}</span>` : '<span class="na">—</span>';
+      const cplCls  = campCpl && campCpl > MQL_CPL_TARGET ? 'color:var(--red);font-weight:700' : (campCpl && campCpl <= MQL_CPL_TARGET ? 'color:var(--green);font-weight:700' : '');
+      const cplStr  = campCpl ? `<span style="${{cplCls}}">${{fmtMoney(campCpl)}}</span>` : '<span class="na">—</span>';
+
+      // Campaign header row
+      adHTML += `<tr class="camp-hdr">
+        <td colspan="4" style="font-weight:700;color:#374151">${{camp}}</td>
+        <td class="r" style="font-weight:600">${{fmtMoney(campData.spend)}}</td>
+        <td class="r">${{campData.clicks > 0 ? campData.clicks.toLocaleString() : '—'}}</td>
+        <td class="r">${{mqlStr}}</td>
+        <td class="r">${{cplStr}}</td>
+      </tr>`;
+
+      // Ad sub-rows
+      campData.ads.forEach(([adName, meta]) => {{
+        const crData   = AD_CREATIVES[adName] || {{}};
+        const adId     = crData.ad_id || meta.ad_id || '';
+        const thumb    = crData.thumb || '';
+        const isVideo  = crData.thumb ? crData.is_video : undefined;
+        const type     = inferType(adName, isVideo);
+        const theme    = inferTheme(adName);
+        const [tBg, tFg] = THEME_COLORS[theme] || ['#f1f5f9','#64748b'];
+
+        const amsUrl   = adId
+          ? `https://adsmanager.facebook.com/adsmanager/manage/ads?act=784297103882588&selected_ad_ids=${{adId}}`
+          : '';
+
+        const previewHTML = thumb
+          ? `<a href="${{amsUrl||'#'}}" target="_blank" rel="noopener" title="View in Ads Manager">
+               <img src="${{thumb}}" alt="" style="width:48px;height:48px;object-fit:cover;border-radius:4px;display:block;border:1px solid var(--border)">
+             </a>`
+          : (amsUrl
+              ? `<a href="${{amsUrl}}" target="_blank" rel="noopener" title="View in Ads Manager" style="font-size:20px;text-decoration:none">🔗</a>`
+              : '<span class="na">—</span>');
+
+        const typeBadge = type === 'Video'
+          ? '<span class="type-badge type-video">▶ Video</span>'
+          : type === 'Static'
+          ? '<span class="type-badge type-static">◼ Static</span>'
+          : '<span class="type-badge type-unk">? Unknown</span>';
+
+        const themeTag = `<span class="theme-tag" style="background:${{tBg}};color:${{tFg}}">${{theme}}</span>`;
+
+        adHTML += `<tr class="ad-row">
+          <td class="td-preview" style="padding-left:20px">${{previewHTML}}</td>
+          <td class="td-name" style="padding-left:8px">${{adName}}</td>
+          <td>${{typeBadge}}</td>
+          <td>${{themeTag}}</td>
+          <td class="r">${{fmtMoney(meta.spend)}}</td>
+          <td class="r">${{meta.link_clicks > 0 ? meta.link_clicks.toLocaleString() : '—'}}</td>
+          <td class="r na">—</td>
+          <td class="r na">—</td>
+        </tr>`;
+      }});
+    }});
+
   document.getElementById('adTableBody').innerHTML = adHTML;
 }}
 
