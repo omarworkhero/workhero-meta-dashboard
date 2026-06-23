@@ -637,7 +637,7 @@ tr:hover td{{background:#f9fafb}}
     <div class="card-header">
       Live Creatives
       <span style="margin-left:8px;font-weight:400;color:var(--muted)" id="adCount"></span>
-      <span style="margin-left:auto;font-size:10px;font-weight:400;color:var(--muted)">Spend/Clicks: Meta &nbsp;·&nbsp; MQLs/CPL: HubSpot (campaign level) &nbsp;·&nbsp; * = campaign total, not per-ad</span>
+      <span style="margin-left:auto;font-size:10px;font-weight:400;color:var(--muted)">Spend/Clicks: Meta &nbsp;·&nbsp; MQLs/CPL: HubSpot campaign total, click-weighted per ad</span>
     </div>
     <table>
       <thead><tr>
@@ -647,8 +647,8 @@ tr:hover td{{background:#f9fafb}}
         <th style="width:110px">Theme</th>
         <th class="r">Spend</th>
         <th class="r">Clicks</th>
-        <th class="r">MQLs *</th>
-        <th class="r">CPL *</th>
+        <th class="r">MQLs ~est</th>
+        <th class="r">CPL ~est</th>
       </tr></thead>
       <tbody id="adTableBody"></tbody>
     </table>
@@ -1192,7 +1192,7 @@ function renderCreative() {{
         <td class="r">${{cplStr}}</td>
       </tr>`;
 
-      // Ad sub-rows
+      // Ad sub-rows — MQLs estimated via click-weighted share of campaign total
       campData.ads.forEach(([adName, meta]) => {{
         const crData   = AD_CREATIVES[adName] || {{}};
         const adId     = crData.ad_id || meta.ad_id || '';
@@ -1222,15 +1222,31 @@ function renderCreative() {{
 
         const themeTag = `<span class="theme-tag" style="background:${{tBg}};color:${{tFg}}">${{theme}}</span>`;
 
+        // Click-weighted MQL estimate: ad's share of campaign clicks × campaign MQLs
+        const campClicks = campData.clicks || 0;
+        const adClicks   = meta.link_clicks || 0;
+        const adMqlEst   = (campMql != null && campClicks > 0 && adClicks > 0)
+          ? Math.round(campMql * adClicks / campClicks)
+          : null;
+        const adCplEst   = (adMqlEst > 0 && meta.spend > 0) ? Math.round(meta.spend / adMqlEst) : null;
+
+        const adMqlStr = adMqlEst != null
+          ? `<span class="td-mql" title="Estimated: ${{adMqlEst}} = ${{campMql}} campaign MQLs × ${{adClicks}}/${{campClicks}} click share">${{adMqlEst}}</span>`
+          : '<span class="na">—</span>';
+        const adCplCls = adCplEst && adCplEst > MQL_CPL_TARGET ? 'color:var(--red);font-weight:700' : (adCplEst && adCplEst <= MQL_CPL_TARGET ? 'color:var(--green);font-weight:700' : '');
+        const adCplStr = adCplEst
+          ? `<span style="${{adCplCls}}" title="Estimated CPL">${{fmtMoney(adCplEst)}}</span>`
+          : '<span class="na">—</span>';
+
         adHTML += `<tr class="ad-row">
           <td class="td-preview" style="padding-left:20px">${{previewHTML}}</td>
           <td class="td-name" style="padding-left:8px">${{adName}}</td>
           <td>${{typeBadge}}</td>
           <td>${{themeTag}}</td>
           <td class="r">${{fmtMoney(meta.spend)}}</td>
-          <td class="r">${{meta.link_clicks > 0 ? meta.link_clicks.toLocaleString() : '—'}}</td>
-          <td class="r na">—</td>
-          <td class="r na">—</td>
+          <td class="r">${{adClicks > 0 ? adClicks.toLocaleString() : '—'}}</td>
+          <td class="r">${{adMqlStr}}</td>
+          <td class="r">${{adCplStr}}</td>
         </tr>`;
       }});
     }});
