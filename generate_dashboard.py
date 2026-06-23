@@ -262,17 +262,21 @@ def _norm_tokens(s):
 def _match_camp(meta_campaign, hs_keys):
     nm = _norm_camp(meta_campaign)
     for k in hs_keys:
-        nk = _norm_camp(k)
-        if nk == nm or nm.find(nk) != -1 or nk.find(nm) != -1:
+        if _norm_camp(k) == nm:
             return k
     tm = _norm_tokens(meta_campaign)
+    best_ratio, best_spec, best_key = 0.0, 0, None
     for k in hs_keys:
         tk = _norm_tokens(k)
+        if not tk:
+            continue
         shorter = tm if len(tm) <= len(tk) else tk
         longer  = tk if len(tm) <= len(tk) else tm
-        if shorter and len(shorter & longer) / len(shorter) >= 0.7:
-            return k
-    return None
+        ratio = len(shorter & longer) / len(shorter) if shorter else 0
+        spec  = len(shorter)
+        if ratio >= 0.7 and (ratio, spec) > (best_ratio, best_spec):
+            best_ratio, best_spec, best_key = ratio, spec, k
+    return best_key
 
 _hs_keys = list({c["campaign"] for c in raw_contacts if c["campaign"] not in ("", "Unknown")})
 _meta_camps = list({r["campaign"] for r in raw_meta_ad_daily if r["campaign"] != "Unknown"})
