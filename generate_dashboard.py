@@ -1006,6 +1006,9 @@ function showCtab(type, btn) {{
 function normCamp(s) {{
   return (s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
 }}
+function normTokens(s) {{
+  return new Set((s || '').toLowerCase().split(/[^a-z0-9]+/).filter(t => t.length > 1));
+}}
 
 function inferTheme(name) {{
   const n = name.toLowerCase();
@@ -1079,10 +1082,25 @@ function renderCreative() {{
     if (campHsCache[metaCampaign] !== undefined) return campHsCache[metaCampaign];
     const normMeta = normCamp(metaCampaign);
     let best = null;
+    // Pass 1: exact or substring match
     for (const [src, data] of Object.entries(hsBySrc)) {{
       const normSrc = normCamp(src);
       if (normSrc === normMeta || normMeta.includes(normSrc) || normSrc.includes(normMeta)) {{
         best = data; break;
+      }}
+    }}
+    // Pass 2: token-overlap fallback (≥70% of shorter string's meaningful tokens appear in the longer)
+    if (!best) {{
+      const tMeta = normTokens(metaCampaign);
+      for (const [src, data] of Object.entries(hsBySrc)) {{
+        const tSrc    = normTokens(src);
+        const shorter = tMeta.size <= tSrc.size ? tMeta : tSrc;
+        const longer  = tMeta.size <= tSrc.size ? tSrc  : tMeta;
+        if (shorter.size > 0) {{
+          let overlap = 0;
+          shorter.forEach(t => {{ if (longer.has(t)) overlap++; }});
+          if (overlap / shorter.size >= 0.7) {{ best = data; break; }}
+        }}
       }}
     }}
     campHsCache[metaCampaign] = best;
