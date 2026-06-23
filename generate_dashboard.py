@@ -250,6 +250,39 @@ print("→ Meta: fetching ad creative thumbnails...")
 ad_creatives = meta_get_ad_creatives(META_ACCESS_TOKEN, META_ACCOUNT_ID)
 print(f"  {len(ad_creatives)} ads with creative info")
 
+# ─── Pre-compute Meta campaign → HubSpot source key mapping ──────────────────
+import re as _re
+
+def _norm_camp(s):
+    return _re.sub(r'[^a-z0-9]', '', (s or '').lower())
+
+def _norm_tokens(s):
+    return set(t for t in _re.split(r'[^a-z0-9]+', (s or '').lower()) if len(t) > 1)
+
+def _match_camp(meta_campaign, hs_keys):
+    nm = _norm_camp(meta_campaign)
+    for k in hs_keys:
+        nk = _norm_camp(k)
+        if nk == nm or nm.find(nk) != -1 or nk.find(nm) != -1:
+            return k
+    tm = _norm_tokens(meta_campaign)
+    for k in hs_keys:
+        tk = _norm_tokens(k)
+        shorter = tm if len(tm) <= len(tk) else tk
+        longer  = tk if len(tm) <= len(tk) else tm
+        if shorter and len(shorter & longer) / len(shorter) >= 0.7:
+            return k
+    return None
+
+_hs_keys = list({c["campaign"] for c in raw_contacts if c["campaign"] not in ("", "Unknown")})
+_meta_camps = list({r["campaign"] for r in raw_meta_ad_daily if r["campaign"] != "Unknown"})
+camp_hs_map = {}
+for _mc in _meta_camps:
+    _matched = _match_camp(_mc, _hs_keys)
+    if _matched:
+        camp_hs_map[_mc] = _matched
+print(f"  Campaign→HS map: {camp_hs_map}")
+
 # Print summary
 total_mqls = sum(1 for c in raw_contacts if c["status"] == "mql")
 print(f"\n  Contacts : {len(raw_contacts)}")
@@ -627,6 +660,7 @@ const RAW_CONTACTS   = {json.dumps(raw_contacts)};
 const RAW_META_DAILY = {json.dumps(raw_meta_daily)};
 const RAW_META_AD_DAILY = {json.dumps(raw_meta_ad_daily)};
 const AD_CREATIVES      = {json.dumps(ad_creatives)};
+const CAMP_HS_MAP       = {json.dumps(camp_hs_map)};
 const DAILY_BUDGET   = {DAILY_BUDGET};
 const MQL_CPL_TARGET = {MQL_CPL_TARGET};
 const HAS_META = {json.dumps(has_meta)};
@@ -1076,35 +1110,14 @@ function renderCreative() {{
     if (c.status === 'bot')          hsBySrc[k].bot++;
   }});
 
-  // ── Step 3: Fuzzy campaign → HubSpot match ──
+  // ── Step 3: Campaign → HubSpot lookup (mapping pre-computed in Python) ──
   const campHsCache = {{}};
   function getHsForCampaign(metaCampaign) {{
     if (campHsCache[metaCampaign] !== undefined) return campHsCache[metaCampaign];
-    const normMeta = normCamp(metaCampaign);
-    let best = null;
-    // Pass 1: exact or substring match
-    for (const [src, data] of Object.entries(hsBySrc)) {{
-      const normSrc = normCamp(src);
-      if (normSrc === normMeta || normMeta.includes(normSrc) || normSrc.includes(normMeta)) {{
-        best = data; break;
-      }}
-    }}
-    // Pass 2: token-overlap fallback (≥70% of shorter string's meaningful tokens appear in the longer)
-    if (!best) {{
-      const tMeta = normTokens(metaCampaign);
-      for (const [src, data] of Object.entries(hsBySrc)) {{
-        const tSrc    = normTokens(src);
-        const shorter = tMeta.size <= tSrc.size ? tMeta : tSrc;
-        const longer  = tMeta.size <= tSrc.size ? tSrc  : tMeta;
-        if (shorter.size > 0) {{
-          let overlap = 0;
-          shorter.forEach(t => {{ if (longer.has(t)) overlap++; }});
-          if (overlap / shorter.size >= 0.7) {{ best = data; break; }}
-        }}
-      }}
-    }}
-    campHsCache[metaCampaign] = best;
-    return best;
+    const hsKey = CAMP_HS_MAP[metaCampaign];
+    const result = hsKey ? (hsBySrc[hsKey] || null) : null;
+    campHsCache[metaCampaign] = result;
+    return result;
   }}
 
   // ── Step 4: Campaign filter buttons ──
