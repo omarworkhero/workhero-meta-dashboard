@@ -129,6 +129,34 @@ if not META_ACCESS_TOKEN:
 else:
     print(f"  {len(meta_camp_daily)} campaign-day rows, {len(meta_ad_daily)} ad-day rows")
 
+# ─── Token expiry check ───────────────────────────────────────────────────────
+import os as _os
+token_days_left = None
+token_expiry_str = ""
+_app_secret = _os.environ.get("META_APP_SECRET", "")
+if META_ACCESS_TOKEN and _app_secret:
+    try:
+        from datetime import timezone
+        dbg = requests.get(
+            "https://graph.facebook.com/debug_token",
+            params={
+                "input_token": META_ACCESS_TOKEN,
+                "access_token": f"1501983588253582|{_app_secret}",
+            },
+            timeout=10,
+        ).json().get("data", {})
+        exp = dbg.get("expires_at", 0)
+        if exp:
+            expiry_dt = datetime.fromtimestamp(exp, tz=timezone.utc)
+            now_utc = datetime.now(tz=timezone.utc)
+            token_days_left = (expiry_dt - now_utc).days
+            token_expiry_str = expiry_dt.strftime("%Y-%m-%d")
+            print(f"  Token expiry: {token_expiry_str} ({token_days_left}d left)")
+    except Exception as e:
+        print(f"  Token expiry check failed: {e}")
+
+Path("token_days_left.txt").write_text(str(token_days_left) if token_days_left is not None else "unknown")
+
 # ─── Classify ─────────────────────────────────────────────────────────────────
 def classify(props):
     disq  = (props.get("disqualification_reason") or "")
@@ -391,13 +419,16 @@ tr:hover td{{background:#f9fafb}}
     <div>
       <b>Meta spend data unavailable</b> — token expired.<br>
       <div class="warn-steps">
-        1. Go to <code>developers.facebook.com/tools/explorer</code><br>
-        2. Select app: <code>WorkHero API</code> → Generate User Token → check <code>ads_read</code><br>
-        3. Paste the token into <code>config.json</code> → <code>meta_access_token</code> field<br>
-        4. Rerun: <code>python3 generate_dashboard.py</code>
+        Drop a fresh token from <code>developers.facebook.com/tools/explorer</code> into Claude Code chat — it rotates automatically in 30 seconds.
       </div>
     </div>
   </div>''' if not has_meta else ''}
+
+  {f\'\'\'<div class="warn-box" style="background:#fef3c7;border-color:#f59e0b;color:#92400e">
+    <span style="font-size:16px">⏰</span>
+    <div><b>Meta token expires in {token_days_left} days</b> ({token_expiry_str}) — rotate it now to avoid a dashboard outage.<br>
+    Drop a fresh token from <code>developers.facebook.com/tools/explorer</code> into Claude Code chat.</div>
+  </div>\'\'\' if token_days_left is not None and 0 < token_days_left <= 14 else \'\'}
 
   <!-- Status banner (updated by JS) -->
   <div id="statusBanner" class="status-banner s-na">
