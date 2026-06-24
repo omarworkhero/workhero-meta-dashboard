@@ -197,27 +197,24 @@ for row in meta_camp_daily:
 
 # Ad-level daily data (for date-range filtering in JS)
 def _meta_mql_from_actions(actions):
-    """Extract MQL count from Meta actions array.
-    Priority: custom offsite conversions (CAPI/MQL events) > standard lead events."""
+    """Extract lead/MQL count from Meta actions array.
+    Priority order matches this account's pixel setup (CompleteRegistration on landing page).
+    Action types confirmed from live data: 2026-06-24."""
     if not actions:
         return 0
-    # Pass 1: any action type hinting at qualified leads or custom conversions
-    for a in actions:
-        t = (a.get("action_type") or "").lower()
-        if "qualified" in t or ("mql" in t):
-            try: return int(float(a.get("value", 0)))
+    action_map = {a.get("action_type", ""): a.get("value", 0) for a in actions}
+    # Priority 1: website pixel form completion (HubSpot form on landing page)
+    for t in ("offsite_conversion.fb_pixel_complete_registration",
+              "complete_registration", "omni_complete_registration"):
+        if t in action_map:
+            try: return int(float(action_map[t]))
             except: pass
-    # Pass 2: any offsite custom conversion (CAPI events sent from HubSpot)
-    for a in actions:
-        t = (a.get("action_type") or "")
-        if t.startswith("offsite_conversion.custom"):
-            try: return int(float(a.get("value", 0)))
-            except: pass
-    # Pass 3: standard lead action
-    for a in actions:
-        t = (a.get("action_type") or "")
-        if t in ("lead", "lead_grouped", "leadgen_other"):
-            try: return int(float(a.get("value", 0)))
+    # Priority 2: Meta Lead Ads or custom CAPI events
+    for t in ("offsite_complete_registration_add_meta_leads",
+              "offsite_conversion.fb_pixel_custom",
+              "offsite_conversion.custom"):
+        if t in action_map:
+            try: return int(float(action_map[t]))
             except: pass
     return 0
 
