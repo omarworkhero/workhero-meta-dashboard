@@ -246,6 +246,35 @@ has_meta  = bool(META_ACCESS_TOKEN and raw_meta_daily)
 has_ads   = bool(raw_meta_ad_daily)
 generated = datetime.now().strftime("%Y-%m-%d %H:%M")
 
+# ─── Pre-compute speed-to-lead per ad ────────────────────────────────────────
+# speed_to_lead[ad_id] = {"days": N, "capped": bool}
+# capped=True means the ad's first-spend date hits the start of our 90-day window,
+# so the true launch may be earlier and the day-count is a lower bound.
+_ad_first_spend = {}
+_ad_first_mql   = {}
+for _row in raw_meta_ad_daily:
+    _aid = _row.get("ad_id", "")
+    _d   = _row.get("date", "")
+    if not _aid or not _d:
+        continue
+    if _aid not in _ad_first_spend or _d < _ad_first_spend[_aid]:
+        _ad_first_spend[_aid] = _d
+    if _row.get("meta_mql", 0) > 0:
+        if _aid not in _ad_first_mql or _d < _ad_first_mql[_aid]:
+            _ad_first_mql[_aid] = _d
+
+speed_to_lead = {}
+for _aid, _fd in _ad_first_spend.items():
+    if _aid in _ad_first_mql:
+        from datetime import datetime as _dt2
+        d0 = _dt2.strptime(_fd, "%Y-%m-%d")
+        d1 = _dt2.strptime(_ad_first_mql[_aid], "%Y-%m-%d")
+        speed_to_lead[_aid] = {
+            "days":   max(0, (d1 - d0).days),
+            "capped": _fd == fetch_start_str,
+        }
+print(f"  Speed-to-lead: {len(speed_to_lead)} ads with MQL / {len(_ad_first_spend)} total ads")
+
 # ─── Fetch ad creative info (thumbnail, video type) ───────────────────────────
 def meta_get_ad_creatives(token, account_id):
     if not token:
@@ -682,6 +711,7 @@ tr:hover td{{background:#f9fafb}}
         <th class="r">Clicks</th>
         <th class="r">MQLs</th>
         <th class="r">CPL</th>
+        <th class="r" style="width:90px">Speed to Lead</th>
       </tr></thead>
       <tbody id="adTableBody"></tbody>
     </table>
@@ -698,6 +728,7 @@ const RAW_META_DAILY = {json.dumps(raw_meta_daily)};
 const RAW_META_AD_DAILY = {json.dumps(raw_meta_ad_daily)};
 const AD_CREATIVES      = {json.dumps(ad_creatives)};
 const CAMP_HS_MAP       = {json.dumps(camp_hs_map)};
+const SPEED_TO_LEAD     = {json.dumps(speed_to_lead)};
 const DAILY_BUDGET   = {DAILY_BUDGET};
 const MQL_CPL_TARGET = {MQL_CPL_TARGET};
 const HAS_META = {json.dumps(has_meta)};
@@ -1201,7 +1232,7 @@ function renderCreative() {{
   // ── Step 6: Group by campaign → campaign header + ad sub-rows ──
   if (filtered.length === 0) {{
     document.getElementById('adTableBody').innerHTML =
-      `<tr><td colspan="8" style="text-align:center;color:var(--muted);padding:24px">${{
+      `<tr><td colspan="9" style="text-align:center;color:var(--muted);padding:24px">${{
         HAS_META ? 'No active creatives in this date range.' : 'Add Meta token to config.json and rerun.'
       }}</td></tr>`;
     return;
@@ -1234,6 +1265,7 @@ function renderCreative() {{
         <td class="r">${{campData.clicks > 0 ? campData.clicks.toLocaleString() : '—'}}</td>
         <td class="r">${{mqlStr}}</td>
         <td class="r">${{cplStr}}</td>
+        <td></td>
       </tr>`;
 
       // Ad sub-rows — MQLs estimated via click-weighted share of campaign total
@@ -1282,6 +1314,20 @@ function renderCreative() {{
           ? `<span style="${{adCplCls}}" title="${{isRealMql ? 'Meta attribution CPL' : 'Click-weighted estimate'}}">${{fmtMoney(adCpl)}}</span>`
           : '<span class="na">—</span>';
 
+        // Speed to lead — days from first spend to first Meta pixel MQL
+        const stlData  = adId ? SPEED_TO_LEAD[adId] : null;
+        let stlStr     = '<span class="na">—</span>';
+        if (stlData != null) {{
+          const d = stlData.days;
+          const cappedNote = stlData.capped ? ' (ad predates 90-day window — lower bound)' : '';
+          const stlColor   = d <= 7  ? 'var(--green)'
+                           : d <= 21 ? '#d97706'
+                           :           'var(--red)';
+          stlStr = `<span style="color:${{stlColor}};font-weight:600"
+                          title="First spend → first Meta lead pixel: ${{d}} day${{d===1?'':'s'}}${{cappedNote}}"
+                    >${{d}}d</span>`;
+        }}
+
         adHTML += `<tr class="ad-row">
           <td class="td-preview" style="padding-left:20px">${{previewHTML}}</td>
           <td class="td-name" style="padding-left:8px">${{adName}}</td>
@@ -1290,6 +1336,7 @@ function renderCreative() {{
           <td class="r">${{adClicks > 0 ? adClicks.toLocaleString() : '—'}}</td>
           <td class="r">${{adMqlStr}}</td>
           <td class="r">${{adCplStr}}</td>
+          <td class="r">${{stlStr}}</td>
         </tr>`;
       }});
     }});
