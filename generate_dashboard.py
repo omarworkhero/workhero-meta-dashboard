@@ -121,7 +121,7 @@ meta_camp_daily = meta_get(META_ACCESS_TOKEN, "campaign",
     "campaign_name,campaign_id,spend,impressions,clicks",
     {"time_increment": 1})
 meta_ad_daily   = meta_get(META_ACCESS_TOKEN, "ad",
-    "campaign_name,adset_name,ad_name,ad_id,spend,inline_link_clicks",
+    "campaign_name,adset_name,ad_name,ad_id,spend,inline_link_clicks,actions",
     {"time_increment": 1})
 
 if not META_ACCESS_TOKEN:
@@ -196,6 +196,39 @@ for row in meta_camp_daily:
     })
 
 # Ad-level daily data (for date-range filtering in JS)
+def _meta_mql_from_actions(actions):
+    """Extract MQL count from Meta actions array.
+    Priority: custom offsite conversions (CAPI/MQL events) > standard lead events."""
+    if not actions:
+        return 0
+    # Pass 1: any action type hinting at qualified leads or custom conversions
+    for a in actions:
+        t = (a.get("action_type") or "").lower()
+        if "qualified" in t or ("mql" in t):
+            try: return int(float(a.get("value", 0)))
+            except: pass
+    # Pass 2: any offsite custom conversion (CAPI events sent from HubSpot)
+    for a in actions:
+        t = (a.get("action_type") or "")
+        if t.startswith("offsite_conversion.custom"):
+            try: return int(float(a.get("value", 0)))
+            except: pass
+    # Pass 3: standard lead action
+    for a in actions:
+        t = (a.get("action_type") or "")
+        if t in ("lead", "lead_grouped", "leadgen_other"):
+            try: return int(float(a.get("value", 0)))
+            except: pass
+    return 0
+
+# Log unique action types found (helps identify the right MQL event)
+_all_action_types = set()
+for row in meta_ad_daily:
+    for a in row.get("actions", []):
+        _all_action_types.add(a.get("action_type", ""))
+if _all_action_types:
+    print(f"  Meta action types found: {sorted(_all_action_types)}")
+
 raw_meta_ad_daily = []
 for row in meta_ad_daily:
     sp = float(row.get("spend", 0))
@@ -209,6 +242,7 @@ for row in meta_ad_daily:
         "campaign":    (row.get("campaign_name") or "Unknown").strip(),
         "spend":       sp,
         "link_clicks": int(row.get("inline_link_clicks", 0)),
+        "meta_mql":    _meta_mql_from_actions(row.get("actions", [])),
     })
 
 has_meta  = bool(META_ACCESS_TOKEN and raw_meta_daily)
@@ -637,7 +671,7 @@ tr:hover td{{background:#f9fafb}}
     <div class="card-header">
       Live Creatives
       <span style="margin-left:8px;font-weight:400;color:var(--muted)" id="adCount"></span>
-      <span style="margin-left:auto;font-size:10px;font-weight:400;color:var(--muted)">Spend/Clicks: Meta &nbsp;·&nbsp; MQLs/CPL: HubSpot campaign total, click-weighted per ad</span>
+      <span style="margin-left:auto;font-size:10px;font-weight:400;color:var(--muted)">Spend/Clicks: Meta &nbsp;·&nbsp; MQLs: Meta attribution where available, ~est = click-weighted</span>
     </div>
     <table>
       <thead><tr>
@@ -647,8 +681,8 @@ tr:hover td{{background:#f9fafb}}
         <th style="width:110px">Theme</th>
         <th class="r">Spend</th>
         <th class="r">Clicks</th>
-        <th class="r">MQLs ~est</th>
-        <th class="r">CPL ~est</th>
+        <th class="r">MQLs</th>
+        <th class="r">CPL</th>
       </tr></thead>
       <tbody id="adTableBody"></tbody>
     </table>
@@ -1222,20 +1256,23 @@ function renderCreative() {{
 
         const themeTag = `<span class="theme-tag" style="background:${{tBg}};color:${{tFg}}">${{theme}}</span>`;
 
-        // Click-weighted MQL estimate: ad's share of campaign clicks × campaign MQLs
-        const campClicks = campData.clicks || 0;
-        const adClicks   = meta.link_clicks || 0;
-        const adMqlEst   = (campMql != null && campClicks > 0 && adClicks > 0)
+        // Per-ad MQLs: use Meta actions (real) when available, else click-weighted estimate
+        const campClicks  = campData.clicks || 0;
+        const adClicks    = meta.link_clicks || 0;
+        const metaMql     = typeof meta.meta_mql === 'number' ? meta.meta_mql : 0;
+        const adMqlEst    = (campMql != null && campClicks > 0 && adClicks > 0)
           ? Math.round(campMql * adClicks / campClicks)
           : null;
-        const adCplEst   = (adMqlEst > 0 && meta.spend > 0) ? Math.round(meta.spend / adMqlEst) : null;
+        const adMql       = metaMql > 0 ? metaMql : adMqlEst;
+        const isRealMql   = metaMql > 0;
+        const adCpl       = (adMql > 0 && meta.spend > 0) ? Math.round(meta.spend / adMql) : null;
 
-        const adMqlStr = adMqlEst != null
-          ? `<span class="td-mql" title="Estimated: ${{adMqlEst}} = ${{campMql}} campaign MQLs × ${{adClicks}}/${{campClicks}} click share">${{adMqlEst}}</span>`
+        const adMqlStr = adMql != null
+          ? `<span class="td-mql" title="${{isRealMql ? 'Meta attribution (real)' : 'Estimated: ' + adMql + ' = ' + campMql + ' campaign MQLs × ' + adClicks + '/' + campClicks + ' click share'}}">${{adMql}}${{isRealMql ? '' : '<sup style="font-size:9px;opacity:.6">~</sup>'}}</span>`
           : '<span class="na">—</span>';
-        const adCplCls = adCplEst && adCplEst > MQL_CPL_TARGET ? 'color:var(--red);font-weight:700' : (adCplEst && adCplEst <= MQL_CPL_TARGET ? 'color:var(--green);font-weight:700' : '');
-        const adCplStr = adCplEst
-          ? `<span style="${{adCplCls}}" title="Estimated CPL">${{fmtMoney(adCplEst)}}</span>`
+        const adCplCls = adCpl && adCpl > MQL_CPL_TARGET ? 'color:var(--red);font-weight:700' : (adCpl && adCpl <= MQL_CPL_TARGET ? 'color:var(--green);font-weight:700' : '');
+        const adCplStr = adCpl
+          ? `<span style="${{adCplCls}}" title="${{isRealMql ? 'Meta attribution CPL (real)' : 'Estimated CPL'}}">${{fmtMoney(adCpl)}}${{isRealMql ? '' : '<sup style="font-size:9px;opacity:.6">~</sup>'}}</span>`
           : '<span class="na">—</span>';
 
         adHTML += `<tr class="ad-row">
