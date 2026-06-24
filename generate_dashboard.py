@@ -670,7 +670,7 @@ tr:hover td{{background:#f9fafb}}
     <div class="card-header">
       Live Creatives
       <span style="margin-left:8px;font-weight:400;color:var(--muted)" id="adCount"></span>
-      <span style="margin-left:auto;font-size:10px;font-weight:400;color:var(--muted)">Spend/Clicks: Meta &nbsp;·&nbsp; MQLs: Meta attribution where available, ~est = click-weighted</span>
+      <span style="margin-left:auto;font-size:10px;font-weight:400;color:var(--muted)">Spend/Clicks: Meta &nbsp;·&nbsp; MQLs: Meta pixel attribution where available, else click-weighted estimate</span>
     </div>
     <table>
       <thead><tr>
