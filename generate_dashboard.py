@@ -252,7 +252,7 @@ def meta_get_ad_creatives(token, account_id):
         return {}
     url = f"https://graph.facebook.com/v19.0/{account_id}/ads"
     params = {
-        "fields": "id,name,creative{thumbnail_url,video_id,object_type}",
+        "fields": "id,name,creative{thumbnail_url,video_id,object_type,body,title}",
         "effective_status": '["ACTIVE","PAUSED","ARCHIVED"]',
         "limit": 500,
         "access_token": token,
@@ -270,6 +270,8 @@ def meta_get_ad_creatives(token, account_id):
                 "ad_id":    ad["id"],
                 "thumb":    cr.get("thumbnail_url", ""),
                 "is_video": bool(cr.get("video_id") or cr.get("object_type") == "VIDEO"),
+                "body":     (cr.get("body") or "").strip(),
+                "title":    (cr.get("title") or "").strip(),
             }
         after = body.get("paging", {}).get("cursors", {}).get("after")
         if not after or not body.get("paging", {}).get("next"):
@@ -1079,32 +1081,43 @@ function normTokens(s) {{
   return new Set((s || '').toLowerCase().split(/[^a-z0-9]+/).filter(t => t.length > 1));
 }}
 
-function inferTheme(name) {{
-  const n = name.toLowerCase();
-  if (n.includes('demo'))                                    return 'Demo';
-  if (n.includes('rebate'))                                  return 'Rebates';
-  if (n.includes('paperwork'))                               return 'Paperwork';
-  if (n.includes('closeout') || n.includes('close out'))     return 'Job Closeouts';
-  if (n.includes('invoice') || n.includes('billing') || /\\bar\\b/.test(n)) return 'Invoicing';
-  if (n.includes('install'))                                 return 'Install';
-  if (n.includes('bofu'))                                    return 'BOFU';
-  if (n.includes('grin') || n.includes('testimonial'))       return 'Testimonial';
-  if (n.includes('high season') || /\\bhs\\s*(var\\s*)?([-–]\\s*)?(ad\\s*)?\\d/i.test(name)) return 'High Season';
-  if (n.includes('fsm') || n.includes('service titan') || n.includes('housecall')) return 'FSM Pain';
+function inferTheme(adName, body, title) {{
+  // Combine ad name + body + title for the richest signal
+  const txt = ((adName || '') + ' ' + (body || '') + ' ' + (title || '')).toLowerCase();
+
+  // Pain angles — ordered from most specific to most generic
+  if (/pricebook|price book|flat.?rate|pricing update/.test(txt))                         return 'Pricebook';
+  if (/cash.?flow|collect|overdue|late.?pay|accounts.?receiv|ar aging|money owed/.test(txt)) return 'Cash Flow';
+  if (/rebate|incentive|utility.?program|hvac.?credit|energy.?credit/.test(txt))           return 'Rebates';
+  if (/closeout|close.?out|job.?close|wrap.?up.?job/.test(txt))                            return 'Job Closeouts';
+  if (/install.?paper|permit|equipment.?reg|warranty.?reg/.test(txt))                      return 'Install Docs';
+  if (/paperwork|admin.?overload|drowning.?in|buried.?in|forms/.test(txt))                 return 'Paperwork';
+  if (/service.?titan|housecall|fieldedge|service.?fusion|fsm|dispatch/.test(txt))         return 'FSM Ops';
+  if (/invoic|billing|unbilled|get.?paid|payment/.test(txt))                               return 'Invoicing';
+  if (/office.?manager|office.?ops|back.?office|admin.?support|fractional/.test(txt))      return 'Office Ops';
+  if (/testimonial|review|customer.?story|case.?study|grain/.test(txt))                    return 'Testimonial';
+  if (/demo|see.?how|watch.?how|show.?you|look.?inside/.test(txt))                        return 'Demo';
+  if (/high.?season|peak.?season|summer|busy.?season|\bhs\b/.test(txt))                  return 'High Season';
+  if (/bofu|book.?a.?call|get.?started|sign.?up|schedule/.test(txt))                      return 'BOFU';
+  if (/don.?t.?do.?it.?alone|not.?alone|support|help/.test(txt))                          return 'Support';
   return 'General';
 }}
 
 const THEME_COLORS = {{
-  'Demo':         ['#eff6ff','#2563eb'],
+  'Pricebook':    ['#fef3c7','#b45309'],
+  'Cash Flow':    ['#fef2f2','#dc2626'],
   'Rebates':      ['#dcfce7','#16a34a'],
-  'Paperwork':    ['#fff7ed','#d97706'],
   'Job Closeouts':['#faf5ff','#7c3aed'],
-  'Invoicing':    ['#fef2f2','#dc2626'],
-  'Install':      ['#ecfeff','#0891b2'],
-  'BOFU':         ['#f5f3ff','#6d28d9'],
+  'Install Docs': ['#ecfeff','#0891b2'],
+  'Paperwork':    ['#fff7ed','#d97706'],
+  'FSM Ops':      ['#fef9c3','#a16207'],
+  'Invoicing':    ['#fef2f2','#b91c1c'],
+  'Office Ops':   ['#f0f9ff','#0369a1'],
   'Testimonial':  ['#fdf4ff','#a21caf'],
+  'Demo':         ['#eff6ff','#2563eb'],
   'High Season':  ['#fff7ed','#ea580c'],
-  'FSM Pain':     ['#fef9c3','#a16207'],
+  'BOFU':         ['#f5f3ff','#6d28d9'],
+  'Support':      ['#f0fdf4','#15803d'],
   'General':      ['#f1f5f9','#64748b'],
 }};
 
@@ -1230,7 +1243,7 @@ function renderCreative() {{
         const thumb    = crData.thumb || '';
         const isVideo  = crData.thumb ? crData.is_video : undefined;
         const type     = inferType(adName, isVideo);
-        const theme    = inferTheme(adName);
+        const theme    = inferTheme(adName, crData.body || '', crData.title || '');
         const [tBg, tFg] = THEME_COLORS[theme] || ['#f1f5f9','#64748b'];
 
         const amsUrl   = adId
