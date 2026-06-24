@@ -1229,7 +1229,7 @@ function renderCreative() {{
 
       // Campaign header row
       adHTML += `<tr class="camp-hdr">
-        <td colspan="4" style="font-weight:700;color:#374151">${{camp}}</td>
+        <td colspan="3" style="font-weight:700;color:#374151">${{camp}}</td>
         <td class="r" style="font-weight:600">${{fmtMoney(campData.spend)}}</td>
         <td class="r">${{campData.clicks > 0 ? campData.clicks.toLocaleString() : '—'}}</td>
         <td class="r">${{mqlStr}}</td>
@@ -1275,11 +1275,11 @@ function renderCreative() {{
         const adCpl       = (adMql > 0 && meta.spend > 0) ? Math.round(meta.spend / adMql) : null;
 
         const adMqlStr = adMql != null
-          ? `<span class="td-mql" title="${{isRealMql ? 'Meta attribution (real)' : 'Estimated: ' + adMql + ' = ' + campMql + ' campaign MQLs × ' + adClicks + '/' + campClicks + ' click share'}}">${{adMql}}${{isRealMql ? '' : '<sup style="font-size:9px;opacity:.6">~</sup>'}}</span>`
+          ? `<span class="td-mql" title="${{isRealMql ? 'Meta attribution' : 'Click-weighted estimate'}}">${{adMql}}</span>`
           : '<span class="na">—</span>';
         const adCplCls = adCpl && adCpl > MQL_CPL_TARGET ? 'color:var(--red);font-weight:700' : (adCpl && adCpl <= MQL_CPL_TARGET ? 'color:var(--green);font-weight:700' : '');
         const adCplStr = adCpl
-          ? `<span style="${{adCplCls}}" title="${{isRealMql ? 'Meta attribution CPL (real)' : 'Estimated CPL'}}">${{fmtMoney(adCpl)}}${{isRealMql ? '' : '<sup style="font-size:9px;opacity:.6">~</sup>'}}</span>`
+          ? `<span style="${{adCplCls}}" title="${{isRealMql ? 'Meta attribution CPL' : 'Click-weighted estimate'}}">${{fmtMoney(adCpl)}}</span>`
           : '<span class="na">—</span>';
 
         adHTML += `<tr class="ad-row">
