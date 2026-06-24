@@ -677,7 +677,7 @@ tr:hover td{{background:#f9fafb}}
         <th style="width:60px">Preview</th>
         <th>Creative (Ad Name)</th>
         <th style="width:72px">Type</th>
-        <th style="width:110px">Theme</th>
+        
         <th class="r">Spend</th>
         <th class="r">Clicks</th>
         <th class="r">MQLs</th>
@@ -1243,8 +1243,6 @@ function renderCreative() {{
         const thumb    = crData.thumb || '';
         const isVideo  = crData.thumb ? crData.is_video : undefined;
         const type     = inferType(adName, isVideo);
-        const theme    = inferTheme(adName, crData.body || '', crData.title || '');
-        const [tBg, tFg] = THEME_COLORS[theme] || ['#f1f5f9','#64748b'];
 
         const amsUrl   = adId
           ? `https://adsmanager.facebook.com/adsmanager/manage/ads?act=784297103882588&selected_ad_ids=${{adId}}`
@@ -1264,7 +1262,6 @@ function renderCreative() {{
           ? '<span class="type-badge type-static">◼ Static</span>'
           : '<span class="type-badge type-unk">? Unknown</span>';
 
-        const themeTag = `<span class="theme-tag" style="background:${{tBg}};color:${{tFg}}">${{theme}}</span>`;
 
         // Per-ad MQLs: use Meta actions (real) when available, else click-weighted estimate
         const campClicks  = campData.clicks || 0;
@@ -1289,7 +1286,6 @@ function renderCreative() {{
           <td class="td-preview" style="padding-left:20px">${{previewHTML}}</td>
           <td class="td-name" style="padding-left:8px">${{adName}}</td>
           <td>${{typeBadge}}</td>
-          <td>${{themeTag}}</td>
           <td class="r">${{fmtMoney(meta.spend)}}</td>
           <td class="r">${{adClicks > 0 ? adClicks.toLocaleString() : '—'}}</td>
           <td class="r">${{adMqlStr}}</td>
