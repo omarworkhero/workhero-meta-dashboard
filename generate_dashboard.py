@@ -890,39 +890,30 @@ function renderOverview() {{
   buildSpendChart(from, to, metaRows, contacts);
   buildCplChart(from, to, metaRows, contacts);
 
-  // Campaign table
-  // Build Meta spend indexed by normalized name
-  const metaSpendByNorm = {{}}, metaNameForNorm = {{}};
+  // Campaign table — use CAMP_HS_MAP (Python pre-computed) for accurate Meta→HS matching
+  const metaSpendByCamp = {{}};
   metaRows.forEach(r => {{
-    const n = normCamp(r.campaign);
-    metaSpendByNorm[n] = (metaSpendByNorm[n] || 0) + r.spend;
-    if (!metaNameForNorm[n]) metaNameForNorm[n] = r.campaign;
+    metaSpendByCamp[r.campaign] = (metaSpendByCamp[r.campaign] || 0) + r.spend;
   }});
 
-  // Merge HubSpot rows with Meta spend via fuzzy norm match
-  const consumedNorms = new Set();
   const campRows = [];
-  Object.entries(byCamp).sort((a,b) => b[1].mql - a[1].mql).forEach(([hsKey, hs]) => {{
-    const n = normCamp(hsKey);
-    let spend = 0, dispName = hsKey;
-    if (metaSpendByNorm[n] !== undefined) {{
-      spend = metaSpendByNorm[n]; dispName = metaNameForNorm[n] || hsKey;
-      consumedNorms.add(n);
-    }} else {{
-      for (const [mn, ms] of Object.entries(metaSpendByNorm)) {{
-        if (!consumedNorms.has(mn) && (n.includes(mn) || mn.includes(n))) {{
-          spend = ms; dispName = metaNameForNorm[mn] || hsKey;
-          consumedNorms.add(mn); break;
-        }}
-      }}
-    }}
-    campRows.push({{ name: dispName, hs, spend }});
+  const consumedHsKeys = new Set();
+
+  // One row per Meta campaign, HS data looked up via CAMP_HS_MAP
+  Object.entries(metaSpendByCamp).forEach(([metaCamp, spend]) => {{
+    const hsKey = CAMP_HS_MAP[metaCamp];
+    const hs    = hsKey ? (byCamp[hsKey] || {{total:0,mql:0,disq:0,bot:0}}) : {{total:0,mql:0,disq:0,bot:0}};
+    if (hsKey) consumedHsKeys.add(hsKey);
+    campRows.push({{ name: metaCamp, hs, spend }});
   }});
-  // Append Meta-only campaigns that had no HubSpot match
-  Object.entries(metaSpendByNorm).forEach(([n, spend]) => {{
-    if (!consumedNorms.has(n))
-      campRows.push({{ name: metaNameForNorm[n], hs: {{total:0,mql:0,disq:0,bot:0}}, spend }});
+
+  // HubSpot-only campaigns with no matching Meta campaign
+  Object.entries(byCamp).forEach(([hsKey, hs]) => {{
+    if (!consumedHsKeys.has(hsKey))
+      campRows.push({{ name: hsKey, hs, spend: 0 }});
   }});
+
+  campRows.sort((a, b) => (b.hs.mql || 0) - (a.hs.mql || 0));
 
   let campHTML = '';
   campRows.forEach(row => {{
