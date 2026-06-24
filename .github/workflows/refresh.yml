@@ -34,6 +34,8 @@ jobs:
         run: python3 write_config.py
 
       - name: Generate dashboard
+        env:
+          META_APP_SECRET: ${{ secrets.META_APP_SECRET }}
         run: python3 generate_dashboard.py
 
       - name: Check Meta data present
@@ -46,6 +48,8 @@ jobs:
             echo "has_meta=false" >> $GITHUB_OUTPUT
             echo "Meta token invalid — keeping previous dashboard live, skipping publish"
           fi
+          DAYS=$(cat token_days_left.txt 2>/dev/null || echo "unknown")
+          echo "token_days=${DAYS}" >> $GITHUB_OUTPUT
 
       - name: Publish as index.html
         if: steps.check.outputs.has_meta == 'true'
@@ -59,3 +63,20 @@ jobs:
           git add index.html
           git diff --staged --quiet || git commit -m "chore: refresh dashboard $(date -u +%Y-%m-%d)"
           git push
+
+      - name: Token health check
+        run: |
+          HAS="${{ steps.check.outputs.has_meta }}"
+          DAYS="${{ steps.check.outputs.token_days }}"
+
+          if [ "$HAS" = "false" ]; then
+            echo "::error title=Meta Token Expired::Dashboard is stale. Fix: go to developers.facebook.com/tools/explorer, copy the token shown in the Access Token box, and drop it in Claude Code chat — it rotates automatically in 30 seconds."
+            exit 1
+          fi
+
+          if echo "$DAYS" | grep -qE '^[0-9]+$' && [ "$DAYS" -le 14 ]; then
+            echo "::error title=Meta Token Expiring in ${DAYS} Days::Rotate now before the dashboard breaks. Go to developers.facebook.com/tools/explorer, copy the token, drop it in Claude Code chat."
+            exit 1
+          fi
+
+          echo "Token healthy: ${DAYS} days remaining."
