@@ -316,6 +316,11 @@ for _mc in _meta_camps:
     _matched = _match_camp(_mc, _hs_keys)
     if _matched:
         camp_hs_map[_mc] = _matched
+print(f"  _hs_keys: {sorted(_hs_keys)}")
+print(f"  _meta_camps: {sorted(_meta_camps)}")
+for _mc in _meta_camps:
+    _r = _match_camp(_mc, _hs_keys)
+    print(f"  match: {_mc!r} -> {_r!r}")
 print(f"  Campaign→HS map: {camp_hs_map}")
 
 # Print summary
