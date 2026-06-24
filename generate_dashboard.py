@@ -120,9 +120,18 @@ print("→ Meta: fetching campaign + ad spend (daily)...")
 meta_camp_daily = meta_get(META_ACCESS_TOKEN, "campaign",
     "campaign_name,campaign_id,spend,impressions,clicks",
     {"time_increment": 1})
-meta_ad_daily   = meta_get(META_ACCESS_TOKEN, "ad",
-    "campaign_name,adset_name,ad_name,ad_id,spend,inline_link_clicks,actions",
-    {"time_increment": 1})
+# Fetch ad-level data in 30-day chunks — avoids Meta 500-row page cap on large time ranges
+meta_ad_daily = []
+_chunk = timedelta(days=29)
+_cs = fetch_start
+while _cs <= fetch_end:
+    _ce = min(_cs + _chunk, fetch_end)
+    _rows = meta_get(META_ACCESS_TOKEN, "ad",
+        "campaign_name,adset_name,ad_name,ad_id,spend,inline_link_clicks,actions",
+        {"time_increment": 1,
+         "time_range": json.dumps({"since": _cs.strftime("%Y-%m-%d"), "until": _ce.strftime("%Y-%m-%d")})})
+    meta_ad_daily.extend(_rows)
+    _cs = _ce + timedelta(days=1)
 
 if not META_ACCESS_TOKEN:
     print("  ⚠  No Meta token — add it to config.json and rerun\n")
