@@ -255,6 +255,12 @@ has_meta  = bool(META_ACCESS_TOKEN and raw_meta_daily)
 has_ads   = bool(raw_meta_ad_daily)
 generated = datetime.now().strftime("%Y-%m-%d %H:%M")
 
+# Staleness check — latest date in ad-level data that has spend > 0
+_spend_dates = [r["date"] for r in raw_meta_ad_daily if r["spend"] > 0]
+ad_data_latest = max(_spend_dates) if _spend_dates else ""
+ad_data_stale  = bool(ad_data_latest and (fetch_end - datetime.strptime(ad_data_latest, "%Y-%m-%d").date()).days > 7)
+print(f"  Ad data latest: {ad_data_latest or 'none'} (stale={ad_data_stale})")
+
 # ─── Pre-compute speed-to-lead per ad ────────────────────────────────────────
 # speed_to_lead[ad_id] = {"days": N, "capped": bool, "est": bool}
 # est=True  → campaign-level fallback (no per-ad pixel event; another ad in the
@@ -590,6 +596,8 @@ tr:hover td{{background:#f9fafb}}
 
   {'<div class="warn-box" style="background:#fef3c7;border-color:#f59e0b;color:#92400e"><span style="font-size:16px">⏰</span><div><b>Meta token expires in ' + str(token_days_left) + ' days</b> (' + token_expiry_str + ') — rotate it now.<br>Drop a fresh token from <code>developers.facebook.com/tools/explorer</code> into Claude Code chat.</div></div>' if token_days_left is not None and 0 < token_days_left <= 14 else ''}
 
+  {'<div class="warn-box" style="background:#fee2e2;border-color:#ef4444;color:#7f1d1d"><span style="font-size:16px">⚠️</span><div><b>Creative data is stale</b> — latest ad spend is from ' + ad_data_latest + ', which is more than 7 days ago.<br>This usually means the Meta API returned truncated data. Re-run the workflow or check GitHub Actions logs.</div></div>' if ad_data_stale else ''}
+
   <!-- Status banner (updated by JS) -->
   <div id="statusBanner" class="status-banner s-na">
     <div id="statusLabel" class="status-label">Loading...</div>
@@ -748,6 +756,8 @@ const RAW_META_AD_DAILY = {json.dumps(raw_meta_ad_daily)};
 const AD_CREATIVES      = {json.dumps(ad_creatives)};
 const CAMP_HS_MAP       = {json.dumps(camp_hs_map)};
 const SPEED_TO_LEAD     = {json.dumps(speed_to_lead)};
+const AD_DATA_LATEST    = {json.dumps(ad_data_latest)};
+const AD_DATA_STALE     = {json.dumps(ad_data_stale)};
 const DAILY_BUDGET   = {DAILY_BUDGET};
 const MQL_CPL_TARGET = {MQL_CPL_TARGET};
 const HAS_META = {json.dumps(has_meta)};

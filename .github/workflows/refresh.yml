@@ -50,6 +50,13 @@ jobs:
           fi
           DAYS=$(cat token_days_left.txt 2>/dev/null || echo "unknown")
           echo "token_days=${DAYS}" >> $GITHUB_OUTPUT
+          STALE=$(python3 -c "
+import re, sys
+html = open('dashboard.html').read()
+m = re.search(r'const AD_DATA_STALE\s*=\s*(true|false)', html)
+print(m.group(1) if m else 'unknown')
+")
+          echo "ad_stale=${STALE}" >> $GITHUB_OUTPUT
 
       - name: Publish as index.html
         if: steps.check.outputs.has_meta == 'true'
@@ -80,3 +87,9 @@ jobs:
           fi
 
           echo "Token healthy: ${DAYS} days remaining."
+
+          STALE="${{ steps.check.outputs.ad_stale }}"
+          if [ "$STALE" = "true" ]; then
+            echo "::error title=Creative Data Stale::Ad-level data is more than 7 days old — likely a Meta API pagination issue. Fix: re-run this workflow. If it persists, check the meta_get chunking logic in generate_dashboard.py."
+            exit 1
+          fi
