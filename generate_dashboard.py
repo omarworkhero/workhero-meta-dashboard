@@ -247,33 +247,43 @@ has_ads   = bool(raw_meta_ad_daily)
 generated = datetime.now().strftime("%Y-%m-%d %H:%M")
 
 # ─── Pre-compute speed-to-lead per ad ────────────────────────────────────────
-# speed_to_lead[ad_id] = {"days": N, "capped": bool}
-# capped=True means the ad's first-spend date hits the start of our 90-day window,
-# so the true launch may be earlier and the day-count is a lower bound.
+# speed_to_lead[ad_id] = {"days": N, "capped": bool, "est": bool}
+# est=True  → campaign-level fallback (no per-ad pixel event; another ad in the
+#             same campaign fired first — this shows time from this ad's launch
+#             to the campaign's first real pixel event)
+# capped=True → ad's first-spend date is at the edge of the 90-day window
 _ad_first_spend = {}
 _ad_first_mql   = {}
+_ad_campaign    = {}
+_camp_first_mql = {}  # campaign → earliest date any ad had meta_mql > 0
 for _row in raw_meta_ad_daily:
-    _aid = _row.get("ad_id", "")
-    _d   = _row.get("date", "")
+    _aid  = _row.get("ad_id", "")
+    _d    = _row.get("date", "")
+    _camp = _row.get("campaign", "")
     if not _aid or not _d:
         continue
+    _ad_campaign[_aid] = _camp
     if _aid not in _ad_first_spend or _d < _ad_first_spend[_aid]:
         _ad_first_spend[_aid] = _d
     if _row.get("meta_mql", 0) > 0:
         if _aid not in _ad_first_mql or _d < _ad_first_mql[_aid]:
             _ad_first_mql[_aid] = _d
+        if _camp and (_camp not in _camp_first_mql or _d < _camp_first_mql[_camp]):
+            _camp_first_mql[_camp] = _d
 
+from datetime import datetime as _dt2
 speed_to_lead = {}
 for _aid, _fd in _ad_first_spend.items():
-    if _aid in _ad_first_mql:
-        from datetime import datetime as _dt2
-        d0 = _dt2.strptime(_fd, "%Y-%m-%d")
-        d1 = _dt2.strptime(_ad_first_mql[_aid], "%Y-%m-%d")
+    _mql_d = _ad_first_mql.get(_aid) or _camp_first_mql.get(_ad_campaign.get(_aid, ""))
+    if _mql_d:
+        d0 = _dt2.strptime(_fd,    "%Y-%m-%d")
+        d1 = _dt2.strptime(_mql_d, "%Y-%m-%d")
         speed_to_lead[_aid] = {
             "days":   max(0, (d1 - d0).days),
             "capped": _fd == fetch_start_str,
+            "est":    _aid not in _ad_first_mql,  # True = campaign fallback
         }
-print(f"  Speed-to-lead: {len(speed_to_lead)} ads with MQL / {len(_ad_first_spend)} total ads")
+print(f"  Speed-to-lead: {len(speed_to_lead)} ads with data / {len(_ad_first_spend)} total ads")
 
 # ─── Fetch ad creative info (thumbnail, video type) ───────────────────────────
 def meta_get_ad_creatives(token, account_id):
@@ -1309,14 +1319,16 @@ function renderCreative() {{
         const stlData  = adId ? SPEED_TO_LEAD[adId] : null;
         let stlStr     = '<span class="na">—</span>';
         if (stlData != null) {{
-          const d = stlData.days;
+          const d          = stlData.days;
+          const isEst      = stlData.est;
           const cappedNote = stlData.capped ? ' (ad predates 90-day window — lower bound)' : '';
+          const estNote    = isEst ? ' (campaign-level — no per-ad pixel event)' : '';
           const stlColor   = d <= 7  ? 'var(--green)'
                            : d <= 21 ? '#d97706'
                            :           'var(--red)';
-          stlStr = `<span style="color:${{stlColor}};font-weight:600"
-                          title="First spend → first Meta lead pixel: ${{d}} day${{d===1?'':'s'}}${{cappedNote}}"
-                    >${{d}}d</span>`;
+          stlStr = `<span style="color:${{stlColor}};font-weight:600;opacity:${{isEst?0.6:1}}"
+                          title="First spend → first Meta lead: ${{d}} day${{d===1?'':'s'}}${{estNote}}${{cappedNote}}"
+                    >${{d}}d${{isEst ? '<sup style="font-size:9px">~</sup>' : ''}}</span>`;
         }}
 
         adHTML += `<tr class="ad-row">
