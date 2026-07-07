@@ -1,5 +1,4 @@
 name: Refresh Meta Dashboard
-# re-indexed 2026-07-07
 
 on:
   schedule:
@@ -51,12 +50,7 @@ jobs:
           fi
           DAYS=$(cat token_days_left.txt 2>/dev/null || echo "unknown")
           echo "token_days=${DAYS}" >> $GITHUB_OUTPUT
-          STALE=$(python3 -c "
-import re, sys
-html = open('dashboard.html').read()
-m = re.search(r'const AD_DATA_STALE\s*=\s*(true|false)', html)
-print(m.group(1) if m else 'unknown')
-")
+          STALE=$(grep -o 'const AD_DATA_STALE = [a-z]*' dashboard.html | grep -o '[a-z]*$' || echo "unknown")
           echo "ad_stale=${STALE}" >> $GITHUB_OUTPUT
 
       - name: Publish as index.html
