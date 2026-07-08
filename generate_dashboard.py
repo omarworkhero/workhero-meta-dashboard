@@ -183,6 +183,7 @@ def classify(props):
 raw_contacts = []
 for c in contacts:
     p = c["properties"]
+    _stage = (p.get("lifecyclestage") or "")
     raw_contacts.append({
         "date":      (p.get("createdate") or "")[:10],
         "name":      f"{p.get('firstname','') or ''} {p.get('lastname','') or ''}".strip() or p.get("email","—"),
@@ -191,6 +192,8 @@ for c in contacts:
         "status":    classify(p),
         "disq_reason": p.get("disqualification_reason") or "",
         "hs_id":     c["id"],
+        "has_opp":   _stage in ("opportunity", "customer", "247021157", "1030073431"),
+        "has_cw":    _stage == "customer",
     })
 
 # Daily Meta spend by campaign
@@ -737,12 +740,14 @@ tr:hover td{{background:#f9fafb}}
         <th class="r">Spend</th>
         <th class="r">Clicks</th>
         <th class="r">MQLs</th>
+        <th class="r">Opps</th>
+        <th class="r">Closed&nbsp;Won</th>
         <th class="r">CPL</th>
         <th class="r" style="width:90px">Speed to Lead</th>
       </tr></thead>
       <tbody id="adTableBody"></tbody>
     </table>
-    <div style="font-size:10px;color:var(--muted);padding:8px 14px;border-top:1px solid var(--border)">* MQLs and CPL are campaign-level totals — HubSpot cannot attribute conversions to individual ads. Shaded rows = campaign summaries.</div>
+    <div style="font-size:10px;color:var(--muted);padding:8px 14px;border-top:1px solid var(--border)">* MQLs, Opps, and Closed Won are campaign-level totals from HubSpot contact lifecycle stage. Per-ad rows (~) are click-weighted estimates. Shaded rows = campaign summaries.</div>
   </div>
 
 </div>
@@ -1202,11 +1207,13 @@ function renderCreative() {{
   const hsBySrc = {{}};
   contacts.forEach(c => {{
     const k = c.campaign;
-    if (!hsBySrc[k]) hsBySrc[k] = {{ total:0, mql:0, disq:0, bot:0 }};
+    if (!hsBySrc[k]) hsBySrc[k] = {{ total:0, mql:0, disq:0, bot:0, opp:0, cw:0 }};
     hsBySrc[k].total++;
     if (c.status === 'mql')          hsBySrc[k].mql++;
     if (c.status === 'disqualified') hsBySrc[k].disq++;
     if (c.status === 'bot')          hsBySrc[k].bot++;
+    if (c.has_opp)                   hsBySrc[k].opp++;
+    if (c.has_cw)                    hsBySrc[k].cw++;
   }});
 
   // ── Step 3: Campaign → HubSpot lookup (mapping pre-computed in Python) ──
@@ -1252,7 +1259,7 @@ function renderCreative() {{
   // ── Step 6: Group by campaign → campaign header + ad sub-rows ──
   if (filtered.length === 0) {{
     document.getElementById('adTableBody').innerHTML =
-      `<tr><td colspan="9" style="text-align:center;color:var(--muted);padding:24px">${{
+      `<tr><td colspan="11" style="text-align:center;color:var(--muted);padding:24px">${{
         HAS_META ? 'No active creatives in this date range.' : 'Add Meta token to config.json and rerun.'
       }}</td></tr>`;
     return;
@@ -1273,8 +1280,12 @@ function renderCreative() {{
     .forEach(([camp, campData]) => {{
       const hs      = getHsForCampaign(camp);
       const campMql = hs ? hs.mql : null;
+      const campOpp = hs ? hs.opp : null;
+      const campCw  = hs ? hs.cw  : null;
       const campCpl = campMql > 0 ? Math.round(campData.spend / campMql) : null;
       const mqlStr  = campMql != null ? `<span class="td-mql">${{campMql}}</span>` : '<span class="na">—</span>';
+      const oppStr  = campOpp != null ? `<span style="font-weight:700;color:#7c3aed">${{campOpp}}</span>` : '<span class="na">—</span>';
+      const cwStr   = campCw  != null ? `<span style="font-weight:700;color:var(--green)">${{campCw}}</span>`  : '<span class="na">—</span>';
       const cplCls  = campCpl && campCpl > MQL_CPL_TARGET ? 'color:var(--red);font-weight:700' : (campCpl && campCpl <= MQL_CPL_TARGET ? 'color:var(--green);font-weight:700' : '');
       const cplStr  = campCpl ? `<span style="${{cplCls}}">${{fmtMoney(campCpl)}}</span>` : '<span class="na">—</span>';
 
@@ -1284,6 +1295,8 @@ function renderCreative() {{
         <td class="r" style="font-weight:600">${{fmtMoney(campData.spend)}}</td>
         <td class="r">${{campData.clicks > 0 ? campData.clicks.toLocaleString() : '—'}}</td>
         <td class="r">${{mqlStr}}</td>
+        <td class="r">${{oppStr}}</td>
+        <td class="r">${{cwStr}}</td>
         <td class="r">${{cplStr}}</td>
         <td></td>
       </tr>`;
@@ -1334,6 +1347,20 @@ function renderCreative() {{
           ? `<span style="${{adCplCls}}" title="${{isRealMql ? 'Meta attribution CPL' : 'Click-weighted estimate'}}">${{fmtMoney(adCpl)}}</span>`
           : '<span class="na">—</span>';
 
+        // Per-ad Opp / Closed Won: click-weighted estimates from campaign totals
+        const adOppEst = (campOpp != null && campClicks > 0 && adClicks > 0)
+          ? Math.round(campOpp * adClicks / campClicks)
+          : null;
+        const adCwEst  = (campCw != null && campClicks > 0 && adClicks > 0)
+          ? Math.round(campCw * adClicks / campClicks)
+          : null;
+        const adOppStr = adOppEst != null
+          ? `<span style="color:#7c3aed;font-weight:600;opacity:0.75" title="Click-weighted estimate">${{adOppEst}}<sup style="font-size:9px">~</sup></span>`
+          : '<span class="na">—</span>';
+        const adCwStr  = adCwEst != null
+          ? `<span style="color:var(--green);font-weight:600;opacity:0.75" title="Click-weighted estimate">${{adCwEst}}<sup style="font-size:9px">~</sup></span>`
+          : '<span class="na">—</span>';
+
         // Speed to lead — days from first spend to first Meta pixel MQL
         const stlData  = adId ? SPEED_TO_LEAD[adId] : null;
         let stlStr     = '<span class="na">—</span>';
@@ -1357,6 +1384,8 @@ function renderCreative() {{
           <td class="r">${{fmtMoney(meta.spend)}}</td>
           <td class="r">${{adClicks > 0 ? adClicks.toLocaleString() : '—'}}</td>
           <td class="r">${{adMqlStr}}</td>
+          <td class="r">${{adOppStr}}</td>
+          <td class="r">${{adCwStr}}</td>
           <td class="r">${{adCplStr}}</td>
           <td class="r">${{stlStr}}</td>
         </tr>`;
