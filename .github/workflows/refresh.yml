@@ -2,7 +2,13 @@ name: Refresh Meta Dashboard
 
 on:
   schedule:
-    - cron: "0 8 * * *"
+    - cron: "0 8 * * *"   # primary: 8AM UTC (4AM ET)
+    - cron: "0 20 * * *"  # backup:  8PM UTC (4PM ET)
+  push:
+    branches: [main]
+    paths-ignore:
+      - "index.html"      # skip if GHA itself pushed (avoids loop)
+      - "README.md"
   workflow_dispatch:
 
 permissions:
@@ -39,4 +45,6 @@ jobs:
         run: python3 generate_dashboard.py
 
       - name: Publish and commit
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
         run: python3 publish.py
