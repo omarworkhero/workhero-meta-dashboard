@@ -51,7 +51,8 @@ subprocess.run(["git", "add", "index.html"], check=True)
 diff = subprocess.run(["git", "diff", "--staged", "--quiet"])
 if diff.returncode != 0:
     subprocess.run(["git", "commit", "-m", f"chore: refresh dashboard {date.today()}"], check=True)
-    subprocess.run(["git", "pull", "--rebase", "origin", "main"], check=True)
+    subprocess.run(["git", "fetch", "origin", "main"], check=True)
+    subprocess.run(["git", "rebase", "--autostash", "origin/main"], check=True)
     subprocess.run(["git", "push"], check=True)
     print("Committed and pushed.")
 else:
