@@ -92,8 +92,8 @@ def hs_deal_associations(token, contact_ids):
             headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
             json={"inputs": [{"id": cid} for cid in batch]},
         )
-        if r.status_code != 200:
-            print(f"  ⚠  associations API error: {r.text[:200]}")
+        if r.status_code not in (200, 207):
+            print(f"  ⚠  associations API error {r.status_code}: {r.text[:200]}")
             continue
         for item in r.json().get("results", []):
             from_id = item.get("from", {}).get("id")
@@ -113,8 +113,8 @@ def hs_deals_batch(token, deal_ids):
             json={"inputs": [{"id": did} for did in batch],
                   "properties": ["dealstage", "hs_is_closed_won"]},
         )
-        if r.status_code != 200:
-            print(f"  ⚠  deals batch API error: {r.text[:200]}")
+        if r.status_code not in (200, 207):
+            print(f"  ⚠  deals batch API error {r.status_code}: {r.text[:200]}")
             continue
         for deal in r.json().get("results", []):
             p = deal.get("properties", {})
