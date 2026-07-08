@@ -82,6 +82,47 @@ def hs_contacts(token, start_ms, end_ms):
             break
     return contacts
 
+def hs_deal_associations(token, contact_ids):
+    """Returns {contact_id: [deal_id, ...]} for all given contact IDs."""
+    result = {}
+    for i in range(0, len(contact_ids), 100):
+        batch = contact_ids[i:i+100]
+        r = requests.post(
+            "https://api.hubapi.com/crm/v3/associations/contacts/deals/batch/read",
+            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+            json={"inputs": [{"id": cid} for cid in batch]},
+        )
+        if r.status_code != 200:
+            print(f"  ⚠  associations API error: {r.text[:200]}")
+            continue
+        for item in r.json().get("results", []):
+            from_id = item.get("from", {}).get("id")
+            deal_ids = [a["id"] for a in item.get("to", [])]
+            if from_id and deal_ids:
+                result[from_id] = deal_ids
+    return result
+
+def hs_deals_batch(token, deal_ids):
+    """Returns {deal_id: {"is_cw": bool}} for all given deal IDs."""
+    result = {}
+    for i in range(0, len(deal_ids), 100):
+        batch = deal_ids[i:i+100]
+        r = requests.post(
+            "https://api.hubapi.com/crm/v3/objects/deals/batch/read",
+            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+            json={"inputs": [{"id": did} for did in batch],
+                  "properties": ["dealstage", "hs_is_closed_won"]},
+        )
+        if r.status_code != 200:
+            print(f"  ⚠  deals batch API error: {r.text[:200]}")
+            continue
+        for deal in r.json().get("results", []):
+            p = deal.get("properties", {})
+            result[deal["id"]] = {
+                "is_cw": str(p.get("hs_is_closed_won", "false")).lower() == "true",
+            }
+    return result
+
 # ─── Meta ─────────────────────────────────────────────────────────────────────
 def meta_get(token, level, fields, extra=None):
     if not token:
@@ -115,6 +156,19 @@ start_ms = int(datetime.combine(fetch_start, datetime.min.time()).timestamp() * 
 end_ms   = int(datetime.combine(fetch_end,   datetime.max.time()).timestamp() * 1000)
 contacts = hs_contacts(access, start_ms, end_ms)
 print(f"  {len(contacts)} paid social contacts")
+
+print("→ HubSpot: fetching deal associations...")
+contact_ids = [c["id"] for c in contacts]
+contact_deal_map = hs_deal_associations(access, contact_ids)
+all_deal_ids = list({did for dids in contact_deal_map.values() for did in dids})
+print(f"  {len(contact_deal_map)} contacts have deals ({len(all_deal_ids)} total deal IDs)")
+deal_info = hs_deals_batch(access, all_deal_ids) if all_deal_ids else {}
+contact_has_opp = set(cid for cid, dids in contact_deal_map.items() if dids)
+contact_has_cw  = set(
+    cid for cid, dids in contact_deal_map.items()
+    if any(deal_info.get(did, {}).get("is_cw") for did in dids)
+)
+print(f"  {len(contact_has_opp)} contacts with any deal, {len(contact_has_cw)} with closed-won")
 
 print("→ Meta: fetching campaign + ad spend (daily)...")
 meta_camp_daily = meta_get(META_ACCESS_TOKEN, "campaign",
@@ -183,7 +237,6 @@ def classify(props):
 raw_contacts = []
 for c in contacts:
     p = c["properties"]
-    _stage = (p.get("lifecyclestage") or "")
     raw_contacts.append({
         "date":      (p.get("createdate") or "")[:10],
         "name":      f"{p.get('firstname','') or ''} {p.get('lastname','') or ''}".strip() or p.get("email","—"),
@@ -192,8 +245,8 @@ for c in contacts:
         "status":    classify(p),
         "disq_reason": p.get("disqualification_reason") or "",
         "hs_id":     c["id"],
-        "has_opp":   _stage in ("opportunity", "customer", "247021157", "1030073431"),
-        "has_cw":    _stage == "customer",
+        "has_opp":   c["id"] in contact_has_opp,
+        "has_cw":    c["id"] in contact_has_cw,
     })
 
 # Daily Meta spend by campaign
