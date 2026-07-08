@@ -43,16 +43,16 @@ if ad_stale == "true":
 Path("index.html").write_text(html)
 print("index.html written")
 
-# Commit
+# Commit — sync to remote HEAD first so we always push exactly one new commit
 subprocess.run(["git", "config", "user.name", "github-actions[bot]"], check=True)
 subprocess.run(["git", "config", "user.email", "github-actions[bot]@users.noreply.github.com"], check=True)
+subprocess.run(["git", "fetch", "origin", "main"], check=True)
+subprocess.run(["git", "reset", "origin/main"], check=True)  # mixed: moves HEAD, keeps working tree
 subprocess.run(["git", "add", "index.html"], check=True)
 
 diff = subprocess.run(["git", "diff", "--staged", "--quiet"])
 if diff.returncode != 0:
     subprocess.run(["git", "commit", "-m", f"chore: refresh dashboard {date.today()}"], check=True)
-    subprocess.run(["git", "fetch", "origin", "main"], check=True)
-    subprocess.run(["git", "rebase", "--autostash", "origin/main"], check=True)
     subprocess.run(["git", "push"], check=True)
     print("Committed and pushed.")
 else:
