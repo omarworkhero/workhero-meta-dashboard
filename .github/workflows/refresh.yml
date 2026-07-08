@@ -25,7 +25,7 @@ jobs:
 
       - run: pip install requests
 
-      - name: Write config from secrets
+      - name: Write config
         env:
           META_ACCESS_TOKEN: ${{ secrets.META_ACCESS_TOKEN }}
           HS_CLIENT_ID: ${{ secrets.HS_CLIENT_ID }}
@@ -38,53 +38,5 @@ jobs:
           META_APP_SECRET: ${{ secrets.META_APP_SECRET }}
         run: python3 generate_dashboard.py
 
-      - name: Check Meta data present
-        id: check
-        run: |
-          if grep -q 'const HAS_META = true' dashboard.html; then
-            echo "has_meta=true" >> $GITHUB_OUTPUT
-            echo "Meta data present — publishing"
-          else
-            echo "has_meta=false" >> $GITHUB_OUTPUT
-            echo "Meta token invalid — keeping previous dashboard live, skipping publish"
-          fi
-          DAYS=$(cat token_days_left.txt 2>/dev/null || echo "unknown")
-          echo "token_days=${DAYS}" >> $GITHUB_OUTPUT
-          STALE=$(grep -o 'const AD_DATA_STALE = [a-z]*' dashboard.html | grep -o '[a-z]*$' || echo "unknown")
-          echo "ad_stale=${STALE}" >> $GITHUB_OUTPUT
-
-      - name: Publish as index.html
-        if: steps.check.outputs.has_meta == 'true'
-        run: mv dashboard.html index.html
-
-      - name: Commit and push
-        if: steps.check.outputs.has_meta == 'true'
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add index.html
-          git diff --staged --quiet || git commit -m "chore: refresh dashboard $(date -u +%Y-%m-%d)"
-          git push
-
-      - name: Token health check
-        run: |
-          HAS="${{ steps.check.outputs.has_meta }}"
-          DAYS="${{ steps.check.outputs.token_days }}"
-
-          if [ "$HAS" = "false" ]; then
-            echo "::error title=Meta Token Expired::Dashboard is stale. Fix: go to developers.facebook.com/tools/explorer, copy the token shown in the Access Token box, and drop it in Claude Code chat — it rotates automatically in 30 seconds."
-            exit 1
-          fi
-
-          if echo "$DAYS" | grep -qE '^[0-9]+$' && [ "$DAYS" -le 14 ]; then
-            echo "::error title=Meta Token Expiring in ${DAYS} Days::Rotate now before the dashboard breaks. Go to developers.facebook.com/tools/explorer, copy the token, drop it in Claude Code chat."
-            exit 1
-          fi
-
-          echo "Token healthy: ${DAYS} days remaining."
-
-          STALE="${{ steps.check.outputs.ad_stale }}"
-          if [ "$STALE" = "true" ]; then
-            echo "::error title=Creative Data Stale::Ad-level data is more than 7 days old — likely a Meta API pagination issue. Fix: re-run this workflow. If it persists, check the meta_get chunking logic in generate_dashboard.py."
-            exit 1
-          fi
+      - name: Publish and commit
+        run: python3 publish.py
